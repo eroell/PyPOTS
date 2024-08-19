@@ -7,6 +7,7 @@ PyPOTS package.
 
 
 from . import (
+    base,
     imputation,
     classification,
     clustering,
@@ -19,6 +20,7 @@ from .gungnir import Gungnir
 from .version import __version__
 
 __all__ = [
+    "base",
     "imputation",
     "classification",
     "clustering",

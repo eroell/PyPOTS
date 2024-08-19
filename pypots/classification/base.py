@@ -8,7 +8,7 @@ The base classes for PyPOTS classification models.
 
 import os
 from abc import abstractmethod
-from typing import Optional, Union
+from typing import Optional, Union, Literal
 
 import numpy as np
 import torch
@@ -22,6 +22,7 @@ try:
 except ImportError:
     pass
 
+import wandb
 
 class BaseClassifier(BaseModel):
     """The abstract class for all PyPOTS classification models.
@@ -207,6 +208,7 @@ class BaseNNClassifier(BaseNNModel):
         saving_path: str = None,
         model_saving_strategy: Optional[str] = "best",
         verbose: bool = True,
+        training_logger: Optional[Literal["wandb", "list"]] = None, # bad typing, added ad hoc & not intending to update all things
     ):
         super().__init__(
             batch_size,
@@ -219,6 +221,7 @@ class BaseNNClassifier(BaseNNModel):
             verbose,
         )
         self.n_classes = n_classes
+        self.training_logger = training_logger
 
     @abstractmethod
     def _assemble_input_for_training(self, data: list) -> dict:
@@ -285,6 +288,30 @@ class BaseNNClassifier(BaseNNModel):
         self.best_loss = float("inf")
         self.best_model_dict = None
 
+        if self.training_logger == "wandb":
+            wandb.init(
+                # entity="myrnnentity",
+                reinit=True,
+                settings=wandb.Settings(start_method="fork"),
+                project="my-rnn-project",
+                # name="my-rnn-experiment",
+                # id="my-rnn-experiment-id",
+                config={
+                    "epochs": self.epochs,
+                    "batch_size": self.batch_size,
+                    "rnn_hidden_size": self.model.rnn_hidden_size,
+                    "learning_rate": self.optimizer.torch_optimizer.param_groups[0]["lr"],
+                }
+            )
+        elif self.training_logger == "list":
+            self.log = {"train_loss": [], "val_loss": []}
+
+        elif self.training_logger is None:
+            pass
+
+        else:
+            raise ValueError(f"Invalid training_logger type {self.training_logger}. Please choose 'wandb' or 'list' or None.")
+
         try:
             training_step = 0
             for epoch in range(1, self.epochs + 1):
@@ -331,11 +358,25 @@ class BaseNNClassifier(BaseNNModel):
                         f"training loss: {mean_train_loss:.4f}, "
                         f"validation loss: {mean_val_loss:.4f}"
                     )
+                    if self.training_logger == "wandb":
+                        wandb.log({
+                            "train_loss": mean_train_loss,
+                            "val_loss": mean_val_loss}
+                            )
+                    elif self.training_logger == "list":
+                        self.log["train_loss"].append(mean_train_loss)
+                        self.log["val_loss"].append(mean_val_loss)
+
                     mean_loss = mean_val_loss
                 else:
                     logger.info(
                         f"Epoch {epoch:03d} - training loss: {mean_train_loss:.4f}"
                     )
+                    if self.logger == "wandb":
+                        wandb.log({"train_loss": mean_train_loss})
+                    elif self.logger == "list":
+                        self.log["train_loss"].append(mean_train_loss)
+
                     mean_loss = mean_train_loss
 
                 if np.isnan(mean_loss):
@@ -389,6 +430,7 @@ class BaseNNClassifier(BaseNNModel):
         logger.info(
             f"Finished training. The best model is from epoch#{self.best_epoch}."
         )
+        wandb.finish()
 
     @abstractmethod
     def fit(
